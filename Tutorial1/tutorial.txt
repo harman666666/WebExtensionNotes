@@ -1,0 +1,306 @@
+TUTORIAL 1 -> https://thoughtbot.com/blog/how-to-make-a-chrome-extension
+
+manifest.json
+
+The manifest.json file tells Chrome important information about your extension, like its name and which permissions it needs.
+
+The most basic possible extension is a directory with a manifest.json file. Let’s create a directory and put the following JSON into manifest.json:
+
+{
+  "manifest_version": 2,
+  "name": "My Cool Extension",
+  "version": "0.1"
+}
+That’s the most basic possible manifest.json, with all required fields filled in. The manifest_version should always be 2, because version 1 is unsupported as of January 2014. So far our extension does absolutely nothing, but let’s load it into Chrome anyway.
+
+Load your extension into Chrome
+
+To load your extension in Chrome, open up chrome://extensions/ in your browser and click “Developer mode” in the top right. Now click “Load unpacked extension…” and select the extension’s directory. You should now see your extension in the list.
+
+When you change or add code in your extension, just come back to this page and reload the page. Chrome will reload your extension.
+
+Content scripts
+
+A content script is “a JavaScript file that runs in the context of web pages.” This means that a content script can interact with web pages that the browser visits. Not every JavaScript file in a Chrome extension can do this; we’ll see why later.
+
+Let’s add a content script named content.js:
+
+// content.js
+alert("Hello from your Chrome extension!")
+To inject the script, we need to tell our manifest.json file about it.
+
+Add this to your manifest.json file:
+
+"content_scripts": [
+  {
+    "matches": [
+      "<all_urls>"
+    ],
+    "js": ["content.js"]
+  }
+]
+This tells Chrome to inject content.js into every page we visit using the special <all_urls> URL pattern. If we want to inject the script on only some pages, we can use match patterns. Here are a few examples of values for "matches":
+
+["https://mail.google.com/*", "http://mail.google.com/*"] injects our script into HTTPS and HTTP Gmail. If we have / at the end instead of /*, it matches the URLs exactly, and so would only inject into https://mail.google.com/, not https://mail.google.com/mail/u/0/#inbox. Usually that isn’t what you want.
+http://*/* will match any http URL, but no other scheme. For example, this won’t inject your script into https sites.
+Reload your Chrome extension. Every single page you visit now pops up an alert. Let’s log the first URL on the page instead.
+
+Logging the URL
+
+jQuery isn’t necessary, but it makes everything easier. First, download a version of jQuery from the jQuery CDN and put it in your extension’s folder. I downloaded the latest minified version, jquery-2.1.3.min.js. To load it, add it to manifest.json before "content.js". Your whole manifest.json should look like this:
+
+{
+  "manifest_version": 2,
+  "name": "My Cool Extension",
+  "version": "0.1",
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": ["jquery-2.1.3.min.js", "content.js"]
+    }
+  ]
+}
+Now that we have jQuery, let’s use it to log the URL of the first external link on the page in content.js:
+
+// content.js
+var firstHref = $("a[href^='http']").eq(0).attr("href");
+
+console.log(firstHref);
+Note that we don’t need to use jQuery to check if the document has loaded. By default, Chrome injects content scripts after the DOM is complete.
+
+Try it out - you should see the output in your console on every page you visit.
+
+Browser Actions
+
+When an extension adds a little icon next to your address bar, that’s a browser action. Your extension can listen for clicks on that button and then do something.
+
+Put the icon.png from Google’s extension tutorial in your extension folder and add this to manifest.json:
+
+"browser_action": {
+  "default_icon": "icon.png"
+}
+In order to use the browser action, we need to add message passing.
+
+Message passing
+
+A content script has access to the current page, but is limited in the APIs it can access. For example, it cannot listen for clicks on the browser action. We need to add a different type of script to our extension, a background script, which has access to every Chrome API but cannot access the current page. As Google puts it:
+
+Content scripts have some limitations. They cannot use chrome.* APIs, with the exception of extension, i18n, runtime, and storage.
+
+So the content script will be able to pull a URL out of the current page, but will need to hand that URL over to the background script to do something useful with it. In order to communicate, we’ll use what Google calls message passing, which allows scripts to send and listen for messages. It is the only way for content scripts and background scripts to interact.
+
+Add the following to tell manifest.json about the background script:
+
+"background": {
+  "scripts": ["background.js"]
+}
+Now we’ll add background.js:
+
+// background.js
+
+// Called when the user clicks on the browser action.
+chrome.browserAction.onClicked.addListener(function(tab) {
+  // Send a message to the active tab
+  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+    var activeTab = tabs[0];
+    chrome.tabs.sendMessage(activeTab.id, {"message": "clicked_browser_action"});
+  });
+});
+This sends an arbitrary JSON payload to the current tab. The keys of the JSON payload can be anything, but I chose "message" for simplicity. Now we need to listen for that message in content.js:
+
+// content.js
+chrome.runtime.onMessage.addListener(
+  function(request, sender, sendResponse) {
+    if( request.message === "clicked_browser_action" ) {
+      var firstHref = $("a[href^='http']").eq(0).attr("href");
+
+      console.log(firstHref);
+    }
+  }
+);
+Notice that all of our previous code has been moved into the listener, so that it is only run when the payload is received. Every time you click the browser action icon, you should see a URL get logged to the console. If it’s not working, try reloading the extension and then reloading the page.
+
+Opening a new tab
+
+We can use the chrome.tabs API to open a new tab:
+
+chrome.tabs.create({"url": "http://google.com"});
+But chrome.tabs can only be used by background.js, so we’ll have to add some more message passing since background.js can open the tab, but can’t grab the URL. Here’s the idea:
+
+Listen for a click on the browser action in background.js. When it’s clicked, send a clicked_browser_action event to content.js.
+When content.js receives the event, it grabs the URL of the first link on the page. Then it sends open_new_tab back to background.js with the URL to open.
+background.js listens for open_new_tab and opens a new tab with the given URL when it receives the message.
+Clicking on the browser action will trigger background.js, which will send a message to content.js, which will send a URL back to background.js, which will open a new tab with the given URL.
+
+First, we need to tell content.js to send the URL to background.js. Change content.js to use this code:
+
+// content.js
+chrome.runtime.onMessage.addListener(
+  function(request, sender, sendResponse) {
+    if( request.message === "clicked_browser_action" ) {
+      var firstHref = $("a[href^='http']").eq(0).attr("href");
+
+      console.log(firstHref);
+
+      // This line is new!
+      chrome.runtime.sendMessage({"message": "open_new_tab", "url": firstHref});
+    }
+  }
+);
+Now we need to add some code to tell background.js to listen for that event:
+
+// background.js
+
+// Called when the user clicks on the browser action.
+chrome.browserAction.onClicked.addListener(function(tab) {
+  // Send a message to the active tab
+  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+    var activeTab = tabs[0];
+    chrome.tabs.sendMessage(activeTab.id, {"message": "clicked_browser_action"});
+  });
+});
+
+// This block is new!
+chrome.runtime.onMessage.addListener(
+  function(request, sender, sendResponse) {
+    if( request.message === "open_new_tab" ) {
+      chrome.tabs.create({"url": request.url});
+    }
+  }
+);
+Now when you click on the browser action icon, it opens a new tab with the first external URL on the page.
+
+Wrapping it up
+
+The full content.js and background.js are above. Here’s the full manifest.json:
+
+{
+  "manifest_version": 2,
+  "name": "My Cool Extension",
+  "version": "0.1",
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": ["jquery-2.1.3.min.js", "content.js"]
+    }
+  ],
+  "browser_action": {
+    "default_icon": "icon.png"
+  }
+}
+And here’s the full directory structure:
+
+.
+├── background.js
+├── content.js
+├── icon.png
+├── jquery-2.1.3.min.js
+└── manifest.json
+More on how to make a Chrome extension
+
+For more information, try the official Chrome extension documentation.
+
+
+########################################################
+MANIFEST.json fields:
+
+Manifest File Format
+
+Every extension has a JSON-formatted manifest file, named manifest.json, that provides important information.
+
+Field summary
+The following code shows the supported manifest fields for Extensions, with links to the page that discusses each field.
+
+{
+  // Required
+  "manifest_version": 2,
+  "name": "My Extension",
+  "version": "versionString",
+
+  // Recommended
+  "default_locale": "en",
+  "description": "A plain text description",
+  "icons": {...},
+
+  // Pick one (or none)
+  "browser_action": {...},
+  "page_action": {...},
+
+  // Optional
+  "action": ...,
+  "author": ...,
+  "automation": ...,
+  "background": {
+    // Recommended
+    "persistent": false,
+    // Optional
+    "service_worker":
+  },
+  "chrome_settings_overrides": {...},
+  "chrome_ui_overrides": {
+    "bookmarks_ui": {
+      "remove_bookmark_shortcut": true,
+      "remove_button": true
+    }
+  },
+  "chrome_url_overrides": {...},
+  "commands": {...},
+  "content_capabilities": ...,
+  "content_scripts": [{...}],
+  "content_security_policy": "policyString",
+  "converted_from_user_script": ...,
+  "current_locale": ...,
+  "declarative_net_request": ...,
+  "devtools_page": "devtools.html",
+  "event_rules": [{...}],
+  "externally_connectable": {
+    "matches": ["*://*.example.com/*"]
+  },
+  "file_browser_handlers": [...],
+  "file_system_provider_capabilities": {
+    "configurable": true,
+    "multiple_mounts": true,
+    "source": "network"
+  },
+  "homepage_url": "http://path/to/homepage",
+  "import": [{"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+  "incognito": "spanning, split, or not_allowed",
+  "input_components": ...,
+  "key": "publicKey",
+  "minimum_chrome_version": "versionString",
+  "nacl_modules": [...],
+  "oauth2": ...,
+  "offline_enabled": true,
+  "omnibox": {
+    "keyword": "aString"
+  },
+  "optional_permissions": ["tabs"],
+  "options_page": "options.html",
+  "options_ui": {
+    "chrome_style": true,
+    "page": "options.html"
+  },
+  "permissions": ["tabs"],
+  "platforms": ...,
+  "replacement_web_app": ...,
+  "requirements": {...},
+  "sandbox": [...],
+  "short_name": "Short Name",
+  "signature": ...,
+  "spellcheck": ...,
+  "storage": {
+    "managed_schema": "schema.json"
+  },
+  "system_indicator": ...,
+  "tts_engine": {...},
+  "update_url": "http://path/to/updateInfo.xml",
+  "version_name": "aString",
+  "web_accessible_resources": [...]
+}

@@ -1,0 +1,228 @@
+tutorial: https://itnext.io/create-chrome-extension-with-reactjs-using-inject-page-strategy-137650de1f39
+
+
+njecting React app to page as content script
+Chrome extension uses content_scripts to mention a JS and CSS file in manifest.json, that needs to be injected into the underlying page. Then this script 
+will have access to the page DOM.
+The problem with our create-react-app is that the build step will generate the output JS file in different name each time (if the content changed). So we
+ have no way to know the actual file name of the JS file, hence we can’t mention in it in our manifest.json file.
+
+
+As a workaround you can just eject out of create-react-app and modify the webpack configuration by hand to create a separate entry point for content script.
+
+
+First run yarn run eject on the command line. This will eject create-react-appand then will create all necessary build scripts inside your project folder.
+Now run yarn install to install all dependencies
+Once ejection is done, go to [PROJECT_HOME]/config/webpack.config.prod.js file and make the following changes in it:
+Change the option entry to have multiple entry points. Here, our content script will be named as content.js
+entry: {
+    app: [require.resolve('./polyfills'), paths.appIndexJs],
+    content: [require.resolve('./polyfills'), './src/content.js']
+},
+
+
+Also, Search for .[contenthash:8], .[chunkhash:8] and remove it from both CSS and JS output file name. 
+This will ensure the generated file will not have a random hash in it, thus we can mention the file name in our manifest JSON.
+
+Once you made the above changes in the webpack.config.prod.js file, now its time to create the content script file. 
+Create a file named content.js and content.cssinside the src folder.
+
+/* src/content.js */
+import React from 'react';
+import ReactDOM from 'react-dom';
+import "./content.css";
+
+class Main extends React.Component {
+    render() {
+        return (
+            <div className={'my-extension'}>
+                <h1>Hello world - My first Extension</h1>
+            </div>
+        )
+    }
+}
+
+const app = document.createElement('div');
+app.id = "my-extension-root";
+document.body.appendChild(app);
+ReactDOM.render(<Main />, app);
+
+/* src/content.css */
+.my-extension {
+   padding: 20px;
+}
+.my-extension h1 {
+    color: #000;
+}
+
+
+And add below css to index.css , I will explain later why we kept both css in separate files.
+
+/* src/index.css */
+#my-extension-root {
+    width: 400px;
+    height: 100%;
+    position: fixed;
+    top: 0px;
+    right: 0px;
+    z-index: 2147483647;
+    background-color: white;
+    box-shadow: 0px 0px 5px #0000009e;
+}
+Now that we have configured React build pipeline and created our content scripts, 
+lets update manifest.json to pick up these files. Add the following code to manifest.json file.
+
+"content_scripts" : [
+    {
+      "matches": [ "<all_urls>" ],
+      "css": ["/static/css/app.css", "/static/css/content.css"],
+      "js": ["/static/js/content.js"]
+    }
+]
+
+
+
+Now build your app, go to chrome://extensions and reload the extension, 
+When you go to any website and refresh it, you can see our extension injected there.
+
+____________________________________-
+
+How to utilize the Chrome messaging API
+
+For accessing chrome API we need to add background script inside 
+PROJECT_HOME/public/app/background.js and add below code to it.
+
+// Called when the user clicks on the browser action
+chrome.browserAction.onClicked.addListener(function(tab) {
+   // Send a message to the active tab
+   chrome.tabs.query({active: true, currentWindow:true},
+      function(tabs) {
+         var activeTab = tabs[0];
+         chrome.tabs.sendMessage(activeTab.id, 
+             {"message": "clicked_browser_action"}
+         );
+   });
+});
+
+
+The code will be executed on extension icon click, 
+It will find the current tab and use sendMessage API 
+f chrome tabs to broadcast message inside that tab.
+
+
+Add background entry to public/manifest.json
+"background": {
+    "scripts": ["app/background.js"]
+}
+
+and remove the default_popup key from browser_action
+
+Note: Don’t remove browser_action key, 
+keep it empty otherwise extension icon click won’t work
+
+"browser_action": {}
+
+
+Now we need to create a receiver that will 
+receive message on browser action clicked. Add below code to src/content.js file
+
+
+app.style.display = "none";
+chrome.runtime.onMessage.addListener(
+   function(request, sender, sendResponse) {
+      if( request.message === "clicked_browser_action") {
+        toggle();
+      }
+   }
+);
+function toggle(){
+   if(app.style.display === "none"){
+     app.style.display = "block";
+   }else{
+     app.style.display = "none";
+   }
+}
+
+
+Note: Don’t forget to add /*global chrome*/ at the top of the React component so the build will succeed
+Now build your app, go to chrome://extensions and reload the extension, When you go to any website and 
+refresh it, On clicking extension icon, injected page will toggle
+
+
+
+Isolate extension CSS using iframe
+When you start writing styles for your component, you will find out that CSS become totally broken on some of sites. So for keeping your CSS isolated, I believe the best solution today is IFrames, Everything inside an iframe will run in an isolated environment.
+For that I am using react-frame-component
+ryanseddon/react-frame-component
+react-frame-component - Render your React app to an iFrame
+github.com
+Install react-frame-component using yarn add
+yarn add react-frame-component
+Now use Frame component to wrap your Main component.
+/*global chrome*/
+/* src/content.js */
+import React from 'react';
+import ReactDOM from 'react-dom';
+import Frame, { FrameContextConsumer }from 'react-frame-component';
+import "./content.css";
+class Main extends React.Component {
+    render() {
+        return (
+            <Frame head={[<link type="text/css" rel="stylesheet" href={chrome.runtime.getURL("/static/css/content.css")} ></link>]}> 
+              <FrameContextConsumer>
+               {
+               // Callback is invoked with iframe's window and document instances
+                   ({document, window}) => {
+                      // Render Children
+                      return (
+                         <div className={'my-extension'}>
+                            <h1>Hello world - My first Extension</h1>
+                         </div>
+                      )
+                   }
+                }
+               </FrameContextConsumer>
+            </Frame>
+        )
+    }
+}
+Note: If you want to make use of iframe document or window you can use FrameContextConsumer , you can pass it as props to child component, If it is not clear ask me in comments.
+In above code you can see I have used getURL chrome API, to add content.css into head of iframe document, so that it will not affect the host page CSS.
+To make getURL chrome API work we need to add content.css under web_accessible_resources key in our manifest.json and remove it from content_scripts key.
+"content_scripts" : [{
+    "matches": [ "<all_urls>" ],
+    "css": ["/static/css/app.css"],
+    "js": ["/static/js/content.js"]
+  }
+],
+"web_accessible_resources":[
+   "/static/css/content.css"
+]
+We need to define height and width of iframe, otherwise it will not be visible, Add below CSS in index.css
+#my-extension-root iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+We have kept two separate files index.css will be compiled as app.css which is used to apply styles on HTML Elements that are outside iframe and content.css will be compiled as content.css which is used to style elements that are inside iframe to prevent css leakage to host page
+Now build your app, go to chrome://extensions and reload the extension, When you go to any website and refresh it. React Component is rendered inside iframe.
+
+
+###############################################################3
+REACT ROUTER TUTORIAL:
+
+
+Routing inside react extension
+If you have more than two child component you must require navigating between them , But using react-router is bit risky, there are some problem with this approach.
+when you navigate between components the components routes will be visible to host page address bar, which will break the host page if you reload it and 
+hence it is not acceptable.
+
+You can look for hashLocationStrategy , but in that case the host page browser back button will be affected.
+So the solution must be something that offers stack-based router that allows basic navigation by pushing to and popping from 
+the router’s state and for that there is route-lite package.
+
+Scout-NU/route-lite
+route-lite - A lightweight, URL-free router for React applications for use in Chrome extensions or Electron apps
+github.com
+I am not covering its implementation in this blog, But you can always ask me in comments if you have any queries.
+

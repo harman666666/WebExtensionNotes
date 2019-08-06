@@ -1,0 +1,318 @@
+Tutorials are following links:
+https://levelup.gitconnected.com/how-to-use-react-js-to-create-chrome-extension-in-5-minutes-2ddb11899815
+https://levelup.gitconnected.com/how-to-use-background-script-to-fetch-data-in-chrome-extension-ef9d7f69625d
+
+
+BAD THING WITH THIS IS IT DOESNT HAVE CONTENT SCRIPTS IN THE MANIFEST. NOT FULLY INTERACTIVE AYY?
+
+Ok 
+npm install
+then 
+npm run build
+
+to build production build
+load the build folder in chrome to run extension!
+
+
+THE CHROME STUFF is in manifest.json which is in public folder!
+
+{
+  "manifest_version": 2,
+  "name": "Hacker Tab",
+  "author": "Hu Chen",
+  "version": "1.7.0",
+  "description": "Replace browser new tab screen with GitHub trending projects.",
+  "icons": {
+    "16": "16.png",
+    "48": "48.png",
+    "128": "128.png"
+  },
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": false
+  },
+  "permissions": ["storage", "alarms"],
+  "content_security_policy": "script-src 'self' https://www.google-analytics.com; object-src 'self'"
+}
+
+The above snippet is what I have used in my extension. You can find other config options as well.
+version: the version of your extension, you should update this when you plan to release a new version.
+
+icons: you need different sizes of Icons to be used in different cases (e.g. Chrome Web Store),
+normally you will only need 16x16 , 48x48 and 128x128 .
+
+chrome_url_overrides: as we are overriding chrome new tab to a custom HTML page, 
+we need to replace newtab to index.html
+
+permissions: include the permissions you need in your extension. 
+I am using chrome.storage API to store user preferred programming 
+languages so I have added storage permission. In general practice, 
+you should only add permissions required in the application.
+
+
+
+
+
+this thing uses react
+
+also uses 
+background.js
+
+it has ES6 syntax, so its transpiled down in the build folder so that 
+chrome can understand it using babel.
+
+
+
+You will notice the persistent parameter, a persistent background page 
+exists during the lifetime of the extension and only one instance of it actively 
+running in the background of the Chrome browser waiting for the user to interact 
+with the extension.
+
+According to Google developer documentation, it is more recommended to use 
+non-persist mode and it could help reduce the resource cost of your extension.
+A non-persistent background script is purely event-based, it stays dormant until 
+an event they are listening for fires, react with specified instructions, then 
+unload. Some examples of events include:
+
+The extension is first installed or updated to a new version or browser restarted.
+
+The background page was listening for an event, and the event is dispatched. 
+(e.g. We will create alarm to dispatch event periodically)
+
+A content script or other extension sends a message.
+
+Another view in the extension, such as a popup, calls runtime.getBackgroundPage.
+
+
+
+INLINE_RUNTIME_CHUNK=false
+
+By default, Create React App embeds a small runtime script 
+into index.html during the production build, this is to reduce 
+the number of HTTP requests. But unfortunately, you will see 
+console errors related to CSP. You could turn off the embedding 
+behavior by setting the INLINE_RUNTIME_CHUNK flag to false .
+
+change in package.json :
+"build": "INLINE_RUNTIME_CHUNK=false react-scripts build"
+Switch to Chrome default tab
+
+
+
+Sometimes people would like to switch back to the default 
+Chrome tab to access top sites. We could use chrome.tabs API.
+
+<Button
+  onClick={() => {
+    chrome.tabs.getCurrent(tab => {
+      chrome.tabs.update(tab.id, {
+        url: 'chrome-search://local-ntp/local-ntp.html',
+      });
+    });
+  }}>
+  Chrome Tab
+</Button>
+
+The URL is not working for Firefox, I have used react-useragent 
+to only show this button for Chrome. Check code here.
+
+Delete favicon
+Create React App comes with a default favicon.ico in the public folder.
+ For Chrome New Tab, we do not want to have any favicons for the new tab, 
+ so we remove it from public folder and also remove the link in index.html .
+
+
+_________________________________________________________________________
+
+TUTORIAL 2: 
+
+
+The extension we built was good, but every time 
+the user opens a new tab we will reload the latest 
+trending repositories from API which could take a 
+few seconds. Even if it just takes a second, it is still slow for a new tab opening.
+
+What if we fetch data in background periodically, save the data in localStorage, 
+and read it on open a new Tab?
+
+It prints “Hello, world!” every 3 minutes. To change it to event-based alarm, 
+we will use alarms API instead.
+
+chrome.alarms.create('refresh', { periodInMinutes: 3 });
+
+Then add a listener.
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  alert("Hello, world!");
+});
+
+
+To use alarms, you will also need to add alarms permission in manifest.json
+
+__________________________________-
+
+
+// create alarm for watchdog and fresh on installed/updated, and start fetch data
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('onInstalled....');
+  scheduleRequest();
+  scheduleWatchdog();
+  startRequest();
+});
+
+// fetch and save data when chrome restarted, alarm will continue running when chrome is restarted
+chrome.runtime.onStartup.addListener(() => {
+  console.log('onStartup....');
+  startRequest();
+});
+
+// alarm listener
+chrome.alarms.onAlarm.addListener(alarm => {
+  // if watchdog is triggered, check whether refresh alarm is there
+  if (alarm && alarm.name === 'watchdog') {
+    chrome.alarms.get('refresh', alarm => {
+      if (alarm) {
+        console.log('Refresh alarm exists. Yay.');
+      } else {
+        // if it is not there, start a new request and reschedule refresh alarm
+        console.log("Refresh alarm doesn't exist, starting a new one");
+        startRequest();
+        scheduleRequest();
+      }
+    });
+  } else {
+    // if refresh alarm triggered, start a new request
+    startRequest();
+  }
+});
+
+// schedule a new fetch every 30 minutes
+function scheduleRequest() {
+  console.log('schedule refresh alarm to 30 minutes...');
+  chrome.alarms.create('refresh', { periodInMinutes: 30 });
+}
+
+// schedule a watchdog check every 5 minutes
+function scheduleWatchdog() {
+  console.log('schedule watchdog alarm to 5 minutes...');
+  chrome.alarms.create('watchdog', { periodInMinutes: 5 });
+}
+
+// fetch data and save to local storage
+async function startRequest() {
+  console.log('start HTTP Request...');
+  const data = await fetchRepositories();
+  saveToLocalStorage(data);
+}
+
+
+___________________________________-
+yarn add --dev webpack-cli npm-run-all rimraf
+
+Notice we should not install webpack.( react-scripts already 
+have it in dependency and it will complain about another 
+instance of webpack ). Feel free to install it if you are not using create-react-app .
+
+
+5.2 Change build script
+Now change your build script to build both your app and background script:
+"prebuild": "rimraf build",
+"build": "npm-run-all build:*",
+"build:app": "INLINE_RUNTIME_CHUNK=false react-scripts build",
+"build:bg": "webpack --mode production ./src/background.js --output ./build/background.js",
+
+We have already covered INLINE_RUNTIME_CHUNK=false in a previous tutorial. 
+After the change, if you run npm run build , it will perform
+
+Clean the build folder
+
+Bundle the React extension using react-script
+
+Bundle the src/background.js using webpack and export to build/background.js
+
+5.5 Add .babelrc
+
+Webpack will need a .babelrc file to compile, and we will need to add it manually. 
+
+Since react-scripts have already installed babel-presets-react-app , we will just need to use it.
+
+{
+  "presets": ["react-app"]
+}
+
+Now run npm run build will have your complete extension together with compiled
+background script in your build folder.
+
+
+####################################################################################################################################################
+####################################################################################################################################################
+
+TUTORIAL 2:
+
+
+heres another example:
+
+create-react-app already includes a manifest.json file in the public folder. 
+override the file with the following manifest:
+
+{
+  "manifest_version": 2,
+
+  "name": "My Extension",
+  "description": "This extension is a starting point to create a real Chrome extension",
+  "version": "0.0.1",
+
+  "browser_action": {
+    "default_popup": "index.html",
+    "default_title": "Open the popup"
+  },
+  "icons": {
+    "16": "logo-small.png",
+    "48": "logo-small.png",
+    "128": "logo-small.png"
+  },
+  "permissions": [
+  ]
+}
+
+What is included in this manifest.json?
+
+We have the manifest version, name and description which are self explanatory. 
+The browser_action section tells Chrome that we will have a popup which will 
+run the index.html file. The icons will be used to present the icon in the 
+extension tray and in Chrome extension list. Last but not least, the 
+permissions array will include all the permissions that the extension 
+will need to operate successfully. Currently it is left empty.
+
+
+Update
+
+Latest versions of Chrome block inline scripts in Chrome extensions. 
+Since create-react-app build in version 2 creates an inline script 
+to run the app you might stumble upon an error message which is related 
+to Content Security Policy (CSP) in the console. In the error message you 
+will get a sha value which can be added to the manifest.json file to solve 
+the problem. This is an example of the manifest I used (the sha key is marked in italic):
+
+{
+  "manifest_version": 2,
+
+  "name": "My Extension",
+  "description": "This extension is a starting point to create a real Chrome extension",
+  "version": "0.0.1",
+
+  "browser_action": {
+    "default_popup": "index.html",
+    "default_title": "Open the popup"
+  },
+  "icons": {
+    "16": "logo-small.png",
+    "48": "logo-small.png",
+    "128": "logo-small.png"
+  },
+  "content_security_policy": "script-src 'self' 'sha256-GgRxr...'; object-src 'self'",  "permissions": [
+  ]
+}

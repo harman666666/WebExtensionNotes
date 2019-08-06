@@ -1,0 +1,115 @@
+tut: https://blog.usejournal.com/making-an-interactive-chrome-extension-with-react-524483d7aa5d
+
+
+yarn install
+yarn build
+
+Injecting a React app within its own modal can offer a new layer of interactivity to the Chrome user experience. 
+Because the app is contained within its own iframe, it can access external resources while also utilizing 
+specific features of the Chrome browser API. Although this article focused on only one example application — 
+a simple Headline Fetcher — the possibilities for utilizing this technology are truly unlimited. Experienced React 
+developers should continue to explore other alternatives to better understand how Chrome and React can work in tandem.
+
+
+The separation of concerns between these two files is important because they serve two different purposes in Chrome. 
+The background script in background.js interfaces with the browser API, providing features that will persist across 
+all parts of the internet. In contrast, the content script in content.js is executed whenever a new page loads, 
+allowing access to HTML elements within a specific page. These differences will become more apparent 
+as we walk through the code for each file below.
+
+
+Create a background.js file in the public folder and add the following code:
+chrome.contextMenus.create({ 
+  id: 'HeadlineFetcher',
+  title: 'Get Headlines',
+  contexts: ['all']
+});
+
+Context menus in Chrome extensions enable us to add an option to the right click menu 
+of the browser. Once deployed, users will be able to right click anywhere and see a “Get Headlines” option like this:
+
+
+As of right now our button won’t do anything, so we’ll need to add some functionality.
+
+chrome.contextMenus.onClicked.addListener(() => {
+    chrome.tabs.query({active: true, currentWindow: true}, tabs => {
+        chrome.tabs.sendMessage(tabs[0].id, {type: 'getHeadlines'});
+    });
+});
+
+This adds a callback function to be invoked whenever a user clicks on the “Get Headlines” option. 
+The action executed within the function will identify the tab a user is 
+currently on and send a message to that tab, telling it to get headlines.
+
+
+Content Script
+
+Now that we have some functionality in background.js, we can move on to creating our content.js file in the same folder.
+ As shown above, the extension will send a message from the background script to the content script. It 
+ would make sense, then, to add some sort of listener for these messages:
+
+chrome.runtime.onMessage.addListener(request => {
+  if (request.type === 'getHeadlines') {
+      // DO SOMETHING
+  }
+});
+
+
+In the case of our app, the thing we want to do after a “getHeadlines” request is open the 
+contents of our React app. So how do we do this? Through dialog tags! By injecting an HTML <dialog>,
+we can ensure that our app appears as a separate modal windoInjecting a React app within its 
+own modal can offer a new layer of interactivity to the Chrome user experience. 
+Because the app is contained within its own iframe, it can access external resources while also utilizing 
+specific features of the Chrome browser API. Although this article focused on only one example application — 
+
+a simple Headline Fetcher — the possibilities for utilizing this technology are truly unlimited. Experienced React 
+developers should continue to explore other alternatives to better understand how Chrome and React can work in tandem.
+stinct from the 
+ page content and more three-dimensional to the user.
+
+
+const modal = document.createElement('dialog');
+modal.setAttribute("style", "height:40%");
+modal.innerHTML =
+       `<iframe id="headlineFetcher" style="height:100%"></ifInjecting a React app within its own modal can offer a new layer of interactivity to the Chrome user experience. 
+Because the app is contained within its own iframe, it can access external resources while also utilizing 
+specific features of the Chrome browser API. Although this article focused on only one example application — 
+a simple Headline Fetcher — the possibilities for utilizing this technology are truly unlimited. Experienced React 
+developers should continue to explore other alternatives to better understand how Chrome and React can work in tandem.
+
+        <div style="position:absolute; top:0px; left:5px;">  Injecting a React app within its own modal can offer a new layer of interactivity to the Chrome user experience. 
+Because the app is contained within its own iframe, it can access external resources while also utilizing 
+specific features of the Chrome browser API. Although this article focused on only one example application — 
+a simple Headline Fetcher — the possibilities for utilizing this technology are truly unlimited. Experienced React 
+developers should continue to explore other alternatives to better understand how Chrome and React can work in tandem.
+
+            <button>x</button>
+        </div>`;
+document.body.appendChild(modal);
+const dialog = document.querySelector("dialog");
+dialog.showModal();
+
+
+We now have a dialog element with an internal iframe, giving us a way to access URL 
+resources through our extension. The styling of this element will change depending on what 
+site we are on, so don’t get too attached to any particular CSS specifications.
+
+
+Now for the key piece of connective tissue: inserting our React app into the iframe. 
+Because index.html is the entry point for our React app, these lines will ensure that 
+the app is served up whenever the modal is opened:
+
+const iframe = document.getElementById("headlineFetcher");  
+iframe.src = chrome.extension.getURL("index.html");
+iframe.frameBorder = 0;
+
+Our injected HTML also includes a button that will allow us to close the 
+dialog box whenever necessary. Although the button currently does nothing, 
+we can add functionality with a simple click listener.
+
+dialog.querySelector("button").addEventListener("click", () => {
+    dialog.close();
+ });
+
+And now we are finished with both background and content scripts!
+

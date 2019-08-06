@@ -1,0 +1,91 @@
+TO PORT TO FIREFOX:
+
+
+Firefox's new WebExtension API means that 
+extensions written for Chrome should, for the most part, 
+work in Firefox with minimal changes.
+
+I found this question when researching how to start developing 
+extensions, so I haven't had a chance to work with anything yet, so YMMV.
+
+
+
+To port extension to firefox just do following:
+
+Review your use of manifest.json features and Chrome extension 
+APIs against the Chrome incompatibilities reference. 
+
+Mozilla provides a service that can help to automate 
+this step: extensiontest.com. If you're using features 
+or APIs that aren't supported in Firefox, you might not 
+be able to port your extension.
+
+Install your extension in Firefox by using about:debugging or the 
+web-ext tool (similar to Chrome’s command-line tools).
+Test your extension.
+
+If you have any problems, contact us on the dev-addons mailing list or 
+#webextensions on IRC.
+
+Package your web extension, manually or using the web-ext tool.
+
+Create an account on addons.mozilla.org then submit your add-on for 
+signing and distribution.
+
+If you use the Chrome command-line option for loading an unpacked 
+extension, check out the web-ext tool which automates temporary 
+installation in Firefox for development.
+___________________________________
+
+________________________________________________
+
+
+Content scripts
+Extensions that read or write to web pages utilize a content script. 
+The content script contains JavaScript that executes in the contexts 
+of a page that has been loaded into the browser. Content scripts read 
+and modify the DOM of web pages the browser visits.
+
+A browser window with a page action and a content script.
+
+
+Content scripts can communicate with their parent extension by 
+exchanging messages and storing values using the storage API.
+
+Shows a communication path between the content script and the parent extension.
+
+Options Page
+Just as extensions allow users to customize the Chrome browser, 
+the options page enables customization of the extension. Options 
+can be used to enable features and allow users to choose what 
+functionality is relevant to their needs.
+
+
+
+Extensions can save data using the storage API, 
+the HTML5 web storage API , or by making server requests 
+that result in saving data. When the extension needs to save 
+something, first consider if it's from an incognito window. 
+By default, extensions don't run in incognito windows.
+
+Incognito mode promises that the window will leave no tracks. 
+When dealing with data from incognito windows, extensions 
+should honor this promise. If an extension normally saves 
+browsing history, don't save history from incognito windows. 
+However, extensions can store setting preferences 
+from any window, incognito or not.
+
+
+
+To detect whether a window is in incognito mode, 
+check the incognito property of the relevant tabs.
+Tab or windows.Window object.
+
+
+function saveTabData(tab) {
+  if (tab.incognito) {
+    return;
+  } else {
+    chrome.storage.local.set({data: tab.url});
+  }
+}
